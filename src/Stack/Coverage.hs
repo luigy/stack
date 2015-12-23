@@ -8,7 +8,6 @@
 module Stack.Coverage
     ( deleteHpcReports
     , updateTixFile
-    , testExeName
     , generateHpcReport
     , HpcReportOpts(..)
     , generateHpcReportForTargets
@@ -28,7 +27,6 @@ import qualified Data.ByteString.Char8 as S8
 import           Data.Foldable (forM_, asum, toList)
 import           Data.Function
 import           Data.List
-import           Data.List.Extra (stripSuffix)
 import qualified Data.Map.Strict as Map
 import           Data.Maybe
 import           Data.Maybe.Extra (mapMaybeM)
@@ -39,7 +37,6 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as LT
 import           Data.Traversable (forM)
-import           Distribution.System (OS (Windows), Platform (Platform))
 import           Network.HTTP.Download (HasHttpManager)
 import           Path
 import           Path.Extra (toFilePathNoTrailingSep)
@@ -66,33 +63,21 @@ deleteHpcReports = do
 -- | Move a tix file into a sub-directory of the hpc report directory. Deletes the old one if one is
 -- present.
 updateTixFile :: (MonadIO m,MonadReader env m,HasConfig env,MonadLogger m,MonadBaseControl IO m,MonadCatch m,HasEnvConfig env)
-            => PackageName -> Path Abs File -> m ()
-updateTixFile pkgName tixSrc = do
-    case stripSuffix ".tix" (toFilePath (filename tixSrc)) of
-        Nothing -> error "Invariant violated: updateTixFile expected a tix filepath."
-        Just testName -> do
-            exists <- fileExists tixSrc
-            when exists $ do
-                tixDest <- tixFilePath pkgName testName
-                removeFileIfExists tixDest
-                createTree (parent tixDest)
-                -- Remove exe modules because they are problematic. This could be revisited if there's a GHC
-                -- version that fixes https://ghc.haskell.org/trac/ghc/ticket/1853
-                mtix <- readTixOrLog tixSrc
-                case mtix of
-                    Nothing -> $logError $ "Failed to read " <> T.pack (toFilePath tixSrc)
-                    Just tix -> do
-                        liftIO $ writeTix (toFilePath tixDest) (removeExeModules tix)
-                        removeFileIfExists tixSrc
-
-testExeName :: (MonadReader env m,HasConfig env) => String -> m String
-testExeName testName = do
-    config <- asks getConfig
-    let exeExtension =
-            case configPlatform config of
-                Platform _ Windows -> ".exe"
-                _ -> ""
-    return $ testName ++ exeExtension
+            => PackageName -> Path Abs File -> String -> m ()
+updateTixFile pkgName tixSrc testName = do
+    exists <- fileExists tixSrc
+    when exists $ do
+        tixDest <- tixFilePath pkgName testName
+        removeFileIfExists tixDest
+        createTree (parent tixDest)
+        -- Remove exe modules because they are problematic. This could be revisited if there's a GHC
+        -- version that fixes https://ghc.haskell.org/trac/ghc/ticket/1853
+        mtix <- readTixOrLog tixSrc
+        case mtix of
+            Nothing -> $logError $ "Failed to read " <> T.pack (toFilePath tixSrc)
+            Just tix -> do
+                liftIO $ writeTix (toFilePath tixDest) (removeExeModules tix)
+                removeFileIfExists tixSrc
 
 -- | Get the directory used for hpc reports for the given pkgId.
 hpcPkgPath :: (MonadIO m,MonadReader env m,HasConfig env,MonadLogger m,MonadBaseControl IO m,MonadCatch m,HasEnvConfig env)
@@ -108,8 +93,7 @@ tixFilePath :: (MonadIO m,MonadReader env m,HasConfig env,MonadLogger m,MonadBas
             => PackageName -> String ->  m (Path Abs File)
 tixFilePath pkgName testName = do
     pkgPath <- hpcPkgPath pkgName
-    exeName <- testExeName testName
-    tixRel <- parseRelFile (testName ++ "/" ++ exeName ++ ".tix")
+    tixRel <- parseRelFile (testName ++ "/" ++ testName ++ ".tix")
     return (pkgPath </> tixRel)
 
 -- | Generates the HTML coverage report and shows a textual coverage summary for a package.

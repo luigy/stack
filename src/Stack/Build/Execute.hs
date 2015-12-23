@@ -1194,7 +1194,10 @@ singleTest runInBase topts testsToRun ac ee task installedMap = do
                         C.TestSuiteExeV10{} -> return (stestName, False)
                         interface -> throwM (TestSuiteTypeUnsupported interface)
 
-                exeName <- testExeName testName'
+                let exeName = testName' ++
+                        case configPlatform config of
+                            Platform _ Windows -> ".exe"
+                            _ -> ""
                 tixPath <- liftM (pkgDir </>) $ parseRelFile $ exeName ++ ".tix"
                 exePath <- liftM (buildDir </>) $ parseRelFile $ "build/" ++ testName' ++ "/" ++ exeName
                 exists <- fileExists exePath
@@ -1253,7 +1256,7 @@ singleTest runInBase topts testsToRun ac ee task installedMap = do
                         -- directory into the hpc work dir, for
                         -- tidiness.
                         when needHpc $
-                            updateTixFile (packageName package) tixPath
+                            updateTixFile (packageName package) tixPath testName'
                         return $ case ec of
                             ExitSuccess -> Map.empty
                             _ -> Map.singleton testName $ Just ec
