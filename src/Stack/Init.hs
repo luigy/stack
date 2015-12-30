@@ -122,7 +122,7 @@ renderStackYaml p =
         _ -> assert False $ B.byteString $ Yaml.encode p
   where
     renderObject o =
-        B.byteString "# For more information, see: https://github.com/commercialhaskell/stack/blob/release/doc/yaml_configuration.md\n\n" <>
+        B.byteString "# For more information, see: http://docs.haskellstack.org/en/stable/yaml_configuration.html\n\n" <>
         F.foldMap (goComment o) comments <>
         goOthers (o `HM.difference` HM.fromList comments) <>
         B.byteString
@@ -136,7 +136,9 @@ renderStackYaml p =
             \# arch: x86_64\n\n\
             \# Extra directories used by stack for building\n\
             \# extra-include-dirs: [/path/to/dir]\n\
-            \# extra-lib-dirs: [/path/to/dir]\n"
+            \# extra-lib-dirs: [/path/to/dir]\n\n\
+            \# Allow a newer minor version of GHC than the snapshot specifies\n\
+            \# compiler-check: newer-minor\n"
 
     comments =
         [ ("resolver", "Specifies the GHC version and set of packages available (e.g., lts-3.5, nightly-2015-09-21, ghc-7.10.2)")
@@ -175,7 +177,7 @@ getSnapshots' =
         $logError ""
         $logError "You can try again, or create your stack.yaml file by hand. See:"
         $logError ""
-        $logError "    https://github.com/commercialhaskell/stack/blob/release/doc/yaml_configuration.md"
+        $logError "    http://docs.haskellstack.org/en/stable/yaml_configuration.html"
         $logError ""
         $logError $ "Exception was: " <> T.pack (show e)
         return Nothing

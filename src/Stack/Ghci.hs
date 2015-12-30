@@ -15,6 +15,7 @@ module Stack.Ghci
     , ghci
     ) where
 
+import           Control.Applicative
 import           Control.Exception.Enclosed (tryAny)
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class
@@ -93,7 +94,7 @@ ghci GhciOpts{..} = do
             { boptsTestOpts = (boptsTestOpts ghciBuildOpts) { toDisableRun = True }
             , boptsBenchmarkOpts = (boptsBenchmarkOpts ghciBuildOpts) { beoDisableRun = True }
             }
-    (targets,mainIsTargets,pkgs) <- ghciSetup bopts ghciNoBuild ghciSkipIntermediate ghciMainIs
+    (targets,mainIsTargets,pkgs) <- ghciSetup bopts ghciNoBuild ghciSkipIntermediate ghciMainIs ghciAdditionalPackages
     config <- asks getConfig
     bconfig <- asks getBuildConfig
     mainFile <- figureOutMainFile bopts mainIsTargets targets pkgs
@@ -218,15 +219,23 @@ ghciSetup
     -> Bool
     -> Bool
     -> Maybe Text
+    -> [String]
     -> m (Map PackageName SimpleTarget, Maybe (Map PackageName SimpleTarget), [GhciPkgInfo])
-ghciSetup bopts noBuild skipIntermediate mainIs = do
-    (_,_,targets) <- parseTargetsFromBuildOpts AllowNoTargets bopts
+ghciSetup bopts0 noBuild skipIntermediate mainIs additionalPackages = do
+    (_,_,targets) <- parseTargetsFromBuildOpts AllowNoTargets bopts0
     mainIsTargets <-
         case mainIs of
             Nothing -> return Nothing
             Just target -> do
-                (_,_,targets') <- parseTargetsFromBuildOpts AllowNoTargets bopts { boptsTargets = [target] }
+                (_,_,targets') <- parseTargetsFromBuildOpts AllowNoTargets bopts0 { boptsTargets = [target] }
                 return (Just targets')
+    addPkgs <- forM additionalPackages $ \name -> do
+        let mres = (packageIdentifierName <$> parsePackageIdentifierFromString name)
+                <|> parsePackageNameFromString name
+        maybe (fail $ "Failed to parse --package option " ++ name) return mres
+    let bopts = bopts0
+            { boptsTargets = boptsTargets bopts0 ++ map T.pack additionalPackages
+            }
     econfig <- asks getEnvConfig
     (realTargets,_,_,_,sourceMap) <- loadSourceMap AllowNoTargets bopts
     menv <- getMinimalEnvOverride
@@ -273,7 +282,7 @@ ghciSetup bopts noBuild skipIntermediate mainIs = do
     infos <-
         forM wanted $
         \(name,(cabalfp,target)) ->
-             makeGhciPkgInfo bopts sourceMap installedMap localLibs name cabalfp target
+             makeGhciPkgInfo bopts sourceMap installedMap localLibs addPkgs name cabalfp target
     checkForIssues infos
     return (realTargets, mainIsTargets, infos)
   where
@@ -290,11 +299,12 @@ makeGhciPkgInfo
     -> SourceMap
     -> InstalledMap
     -> [PackageName]
+    -> [PackageName]
     -> PackageName
     -> Path Abs File
     -> SimpleTarget
     -> m GhciPkgInfo
-makeGhciPkgInfo bopts sourceMap installedMap locals name cabalfp target = do
+makeGhciPkgInfo bopts sourceMap installedMap locals addPkgs name cabalfp target = do
     econfig <- asks getEnvConfig
     bconfig <- asks getBuildConfig
     let config =
@@ -307,7 +317,7 @@ makeGhciPkgInfo bopts sourceMap installedMap locals name cabalfp target = do
             }
     (warnings,pkg) <- readPackage config cabalfp
     mapM_ (printCabalFileWarning cabalfp) warnings
-    (mods,files,opts) <- getPackageOpts (packageOpts pkg) sourceMap installedMap locals cabalfp
+    (mods,files,opts) <- getPackageOpts (packageOpts pkg) sourceMap installedMap locals addPkgs cabalfp
     let filteredOpts = filterWanted opts
         filterWanted = M.filterWithKey (\k _ -> k `S.member` allWanted)
         allWanted = wantedPackageComponents bopts target pkg

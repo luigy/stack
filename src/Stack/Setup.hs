@@ -156,7 +156,7 @@ instance Show SetupException where
         [ "The GHC located at "
         , toFilePath ghc
         , " failed to compile a sanity check. Please see:\n\n"
-        , "    https://github.com/commercialhaskell/stack/blob/release/doc/install_and_upgrade.md\n\n"
+        , "    http://docs.haskellstack.org/en/stable/install_and_upgrade.html\n\n"
         , "for more information. Exception was:\n"
         , show e
         ]
@@ -1310,7 +1310,6 @@ getUtf8EnvVars
 getUtf8EnvVars menv compilerVer = do
     if getGhcVersion compilerVer >= $(mkVersion "7.10.3")
         -- GHC_CHARENC supported by GHC >=7.10.3
-        --EKB XXX TEST
         then return $ Map.singleton "GHC_CHARENC" "UTF-8"
         else legacyLocale
   where
