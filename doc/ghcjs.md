@@ -7,6 +7,11 @@ To use GHCJS with stack `>= 0.1.8`, place a GHCJS version in the [`compiler`](ht
 
 You can also build existing stack projects which target GHC, and instead build them with GHCJS.  For example: `stack build --compiler ghcjs-0.1.0.20150924_ghc-7.10.2`
 
+Sidenote: If you receive a message like `The program 'ghcjs' version >=0.1 is
+required but the version of .../ghcjs could not be determined.`, then you may
+need to install a different version of `node`. See
+[stack issue #1496](https://github.com/commercialhaskell/stack/issues/1496).
+
 ## Example Configurations
 
 ### GHCJS (old base)
@@ -23,16 +28,16 @@ compiler-check: match-exact
 To use the master branch, a.k.a improved base, add the following to your `stack.yaml`:
 
 ```yaml
-compiler: ghcjs-0.2.0.20151001_ghc-7.10.2
+compiler: ghcjs-0.2.0.20151230.3_ghc-7.10.2
 compiler-check: match-exact
 setup-info:
-  ghcjs:
-    source:
-      ghcjs-0.2.0.20151001_ghc-7.10.2:
-        url: "https://github.com/fizruk/ghcjs/releases/download/v0.2.0.20151001/ghcjs-0.2.0.20151001.tar.gz"
+ ghcjs:
+  source:
+   ghcjs-0.2.0.20151230.3_ghc-7.10.2:
+    url: "https://github.com/nrolland/ghcjs/releases/download/v.0.2.0.20151230.3/ghcjs-0.2.0.20151230.3.tar.gz"
 ```
 
-or for the 2015-10-29 master branch
+or for the 2015-10-29 version
 ```yaml
 compiler: ghcjs-0.2.0.20151029_ghc-7.10.2
 compiler-check: match-exact
@@ -43,17 +48,15 @@ setup-info:
                     url: "https://github.com/nrolland/ghcjs/releases/download/v0.2.0.20151029/ghcjs-0.2.0.20151029.tar.gz"
 ```
 
-or for the 2015-12-30 master branch
-
+or for the 2015-10-01 version
 ```yaml
-resolver: ghcjs-0.2.0.20151230.3_ghc-7.10.2
-compiler: ghcjs-0.2.0.20151230.3_ghc-7.10.2
+compiler: ghcjs-0.2.0.20151001_ghc-7.10.2
 compiler-check: match-exact
 setup-info:
- ghcjs:
-  source:
-   ghcjs-0.2.0.20151230.3_ghc-7.10.2:
-    url: "https://github.com/nrolland/ghcjs/releases/download/v.0.2.0.20151230.3/ghcjs-0.2.0.20151230.3.tar.gz"
+  ghcjs:
+    source:
+      ghcjs-0.2.0.20151001_ghc-7.10.2:
+        url: "https://github.com/fizruk/ghcjs/releases/download/v0.2.0.20151001/ghcjs-0.2.0.20151001.tar.gz"
 ```
 
 ### Custom installed GHCJS (development branch)

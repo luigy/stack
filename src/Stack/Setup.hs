@@ -218,7 +218,8 @@ setupEnv mResolveMissingGHC = do
 
     menv <- mkEnvOverride platform env
     compilerVer <- getCompilerVersion menv wc
-    cabalVer <- getCabalPkgVer menv wc
+    globaldb <- getGlobalDB menv wc
+    cabalVer <- getCabalPkgVer menv wc globaldb
     packages <- mapM
         (resolvePackageEntry menv (bcRoot bconfig))
         (bcPackageEntries bconfig)
@@ -240,7 +241,6 @@ setupEnv mResolveMissingGHC = do
     createDatabase menv wc deps
     localdb <- runReaderT packageDatabaseLocal envConfig0
     createDatabase menv wc localdb
-    globaldb <- getGlobalDB menv wc
     extras <- runReaderT packageDatabaseExtra envConfig0
     let mkGPP locals = mkGhcPackagePath locals localdb deps extras globaldb
 
@@ -483,7 +483,8 @@ upgradeCabal menv wc = do
             [PackageIdentifier name' version]
                 | name == name' -> return version
             x -> error $ "Unexpected results for resolvePackages: " ++ show x
-    installed <- getCabalPkgVer menv wc
+    globaldb <- getGlobalDB menv wc
+    installed <- getCabalPkgVer menv wc globaldb
     if installed >= newest
         then $logInfo $ T.concat
             [ "Currently installed Cabal is "
@@ -682,10 +683,7 @@ downloadAndInstallCompiler si wanted versionCheck _mbindistUrl = do
     $logInfo "Preparing to install GHCJS to an isolated location."
     $logInfo "This will not interfere with any system-level installation."
     let tool = ToolGhcjs selectedVersion
-        installer = installGHCJS $ case selectedVersion of
-            GhcjsVersion version _ -> version
-            _ -> error "Invariant violated: expected ghcjs version in downloadAndInstallCompiler."
-    downloadAndInstallTool (configLocalPrograms config) si downloadInfo tool installer
+    downloadAndInstallTool (configLocalPrograms config) si downloadInfo tool installGHCJS
 
 getWantedCompilerInfo :: (Ord k, MonadThrow m)
                       => Text
@@ -808,13 +806,12 @@ installGHCPosix version _ archiveFile archiveType destDir = do
         $logDebug $ "GHC installed to " <> T.pack (toFilePath destDir)
 
 installGHCJS :: (MonadIO m, MonadMask m, MonadLogger m, MonadReader env m, HasConfig env, HasHttpManager env, HasTerminal env, HasReExec env, HasLogLevel env, MonadBaseControl IO m)
-             => Version
-             -> SetupInfo
+             => SetupInfo
              -> Path Abs File
              -> ArchiveType
              -> Path Abs Dir
              -> m ()
-installGHCJS version si archiveFile archiveType destDir = do
+installGHCJS si archiveFile archiveType destDir = do
     platform <- asks getPlatform
     menv0 <- getMinimalEnvOverride
     -- This ensures that locking is disabled for the invocations of
@@ -835,10 +832,9 @@ installGHCJS version si archiveFile archiveType destDir = do
     -- install cabal-install. This lets us also fix the version of
     -- cabal-install used.
     let unpackDir = destDir </> $(mkRelDir "src")
-    tarComponent <- parseRelDir ("ghcjs-" ++ versionString version)
     runUnpack <- case platform of
         Platform _ Cabal.Windows -> return $
-            withUnpackedTarball7z "GHCJS" si archiveFile archiveType tarComponent unpackDir
+            withUnpackedTarball7z "GHCJS" si archiveFile archiveType Nothing unpackDir
         _ -> do
             zipTool' <-
                 case archiveType of
@@ -854,7 +850,8 @@ installGHCJS version si archiveFile archiveType destDir = do
             return $ do
                 removeTreeIfExists unpackDir
                 readInNull destDir tarTool menv ["xf", toFilePath archiveFile] Nothing
-                renameDir (destDir </> tarComponent) unpackDir
+                innerDir <- expectSingleUnpackedDir archiveFile destDir
+                renameDir innerDir unpackDir
 
     $logSticky $ T.concat ["Unpacking GHCJS into ", T.pack . toFilePath $ unpackDir, " ..."]
     $logDebug $ "Unpacking " <> T.pack (toFilePath archiveFile)
@@ -1044,7 +1041,7 @@ installGHCWindows :: (MonadIO m, MonadMask m, MonadLogger m, MonadReader env m, 
                   -> m ()
 installGHCWindows version si archiveFile archiveType destDir = do
     tarComponent <- parseRelDir $ "ghc-" ++ versionString version
-    withUnpackedTarball7z "GHC" si archiveFile archiveType tarComponent destDir
+    withUnpackedTarball7z "GHC" si archiveFile archiveType (Just tarComponent) destDir
     $logInfo $ "GHC installed to " <> T.pack (toFilePath destDir)
 
 installMsys2Windows :: (MonadIO m, MonadMask m, MonadLogger m, MonadReader env m, HasConfig env, HasHttpManager env, MonadBaseControl IO m)
@@ -1063,7 +1060,7 @@ installMsys2Windows osKey si archiveFile archiveType destDir = do
         throwM e
 
     msys <- parseRelDir $ "msys" ++ T.unpack (fromMaybe "32" $ T.stripPrefix "windows" osKey)
-    withUnpackedTarball7z "MSYS2" si archiveFile archiveType msys destDir
+    withUnpackedTarball7z "MSYS2" si archiveFile archiveType (Just msys) destDir
 
     platform <- asks getPlatform
     menv0 <- getMinimalEnvOverride
@@ -1091,10 +1088,10 @@ withUnpackedTarball7z :: (MonadIO m, MonadMask m, MonadLogger m, MonadReader env
                       -> SetupInfo
                       -> Path Abs File -- ^ Path to archive file
                       -> ArchiveType
-                      -> Path Rel Dir -- ^ Name of directory expected to be in archive.
+                      -> Maybe (Path Rel Dir) -- ^ Name of directory expected in archive.  If Nothing, expects a single folder.
                       -> Path Abs Dir -- ^ Destination directory.
                       -> m ()
-withUnpackedTarball7z name si archiveFile archiveType srcDir destDir = do
+withUnpackedTarball7z name si archiveFile archiveType msrcDir destDir = do
     suffix <-
         case archiveType of
             TarXz -> return ".xz"
@@ -1109,7 +1106,9 @@ withUnpackedTarball7z name si archiveFile archiveType srcDir destDir = do
     let tmpName = toFilePathNoTrailingSep (dirname destDir) ++ "-tmp"
     createTree (parent destDir)
     withCanonicalizedTempDirectory (toFilePath $ parent destDir) tmpName $ \tmpDir -> do
-        let absSrcDir = tmpDir </> srcDir
+        absSrcDir <- case msrcDir of
+            Just srcDir -> return $ tmpDir </> srcDir
+            Nothing -> expectSingleUnpackedDir archiveFile tmpDir
         removeTreeIfExists destDir
         run7z (parent archiveFile) archiveFile
         run7z tmpDir tarFile
@@ -1121,6 +1120,13 @@ withUnpackedTarball7z name si archiveFile archiveType srcDir destDir = do
                 , T.pack $ show e
                 ])
         renameDir absSrcDir destDir
+
+expectSingleUnpackedDir :: (MonadIO m, MonadThrow m) => Path Abs File -> Path Abs Dir -> m (Path Abs Dir)
+expectSingleUnpackedDir archiveFile destDir = do
+    contents <- listDirectory destDir
+    case contents of
+        ([dir], []) -> return dir
+        _ -> error $ "Expected a single directory within unpacked " ++ toFilePath archiveFile
 
 -- | Download 7z as necessary, and get a function for unpacking things.
 --

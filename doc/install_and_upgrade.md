@@ -73,6 +73,11 @@ brew install haskell-stack
 Note: the Homebrew formula and bottles lag slightly behind new Stack releases,
 but tend to be updated within a day or two.
 
+Normally, Homebrew will install from a pre-built binary (aka "pour from a
+bottle"), but if `brew` starts trying to build everything from source (which
+will take hours), see
+[their FAQ on the topic](https://github.com/Homebrew/homebrew/blob/master/share/doc/homebrew/FAQ.md#why-do-you-compile-everything).
+
 ### Manual download
 
 * Download the latest release:
@@ -135,10 +140,6 @@ Yosemite and Mavericks as well, and may also work on older versions (YMMV).
       * Debian 7 (amd64)
 
             echo 'deb http://download.fpcomplete.com/debian wheezy main'|sudo tee /etc/apt/sources.list.d/fpco.list
-
-        Note: The official GHC >7.10.3 bindists do not support Debian 7, so
-        `stack setup` will not work on Debian 7 with GHC >7.10.3.  We will drop
-        support for Debian 7 once GHC 8.0 is released.
 
     For unstable Debian distributions, the package from the most recent stable
     release will usually work. If it doesn't, please
@@ -225,15 +226,16 @@ releases by ten days or more.
 
 ## Arch Linux
 
-*note*: for 32-bit, use the [generic Linux option](#linux). (You will need to ensure libtinfo is installed, see below.)
+*Note:* `stack` package in the [community] repository isn't managed by the 
+Stack release team. Depending on the maintainer's availability, it can lag
+new releases by some days.
 
-stack can be found in the AUR:
-  - [haskell-stack](https://aur.archlinux.org/packages/haskell-stack/) _latest stable version_
+  - [stack](https://www.archlinux.org/packages/community/x86_64/stack/) _latest stable version_
   - [haskell-stack-git](https://aur.archlinux.org/packages/haskell-stack-git/) _git version_
 
-In order to install stack from Hackage or from source, you will need the [libtinfo](https://aur.archlinux.org/packages/libtinfo/) Arch Linux package installed.  If this package is not installed, stack will not be able to install GHC.  
+In order to install stack from Hackage or from source, you will need the [libtinfo](https://aur.archlinux.org/packages/libtinfo/) Arch Linux package installed.  If this package is not installed, stack will not be able to install GHC.
 
-If you use the [ArchHaskell repository](https://wiki.archlinux.org/index.php/ArchHaskell), you can also get the `haskell-stack` package from there.
+If you use the [ArchHaskell repository](https://wiki.archlinux.org/index.php/ArchHaskell), you can also get the `haskell-stack-tool` package from there.
 
 ## NixOS
 

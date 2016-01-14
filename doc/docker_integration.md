@@ -116,7 +116,7 @@ otherwise noted.
       # the case.
       enable: true
 
-      # The name of the repository to pull the image from.  See the "reposities"
+      # The name of the repository to pull the image from.  See the "repositories"
       # section of this document for more information about available repositories.
       # If this includes a tag (e.g. "my/image:tag"), that tagged image will be
       # used.  Without a tag specified, the LTS version slug is added automatically.
@@ -271,7 +271,7 @@ user. For example (from
     # Restart the Docker daemon.
     sudo service docker restart
 
-You will now need to log out and log in again for the the group addition
+You will now need to log out and log in again for the group addition
 to take effect.
 
 Note the above has security implications.  See [security](#security) for more.
@@ -281,7 +281,7 @@ Security
 
 Having `docker` usable as a non-root user is always a security risk, and will
 allow root access to your system. It is also possible to craft a `stack.yaml`
-that will run arbitrary commands in an arbirary docker container through that
+that will run arbitrary commands in an arbitrary docker container through that
 vector, thus a `stack.yaml` could cause stack to run arbitrary commands as root.
 While this is a risk, it is not really a greater risk than is posed by the
 docker permissions in the first place (for example, if you ever run an unknown
@@ -325,7 +325,7 @@ by default, meaning a process running in the container can connect to
 services running on the host, and a server process run within the container
 can be accessed from the host without needing to explicitly publish its port.
 To run the container with an isolated network, use `--docker-run-args` to pass
-a the `--net` argument to `docker-run`.  For example:
+the `--net` argument to `docker-run`.  For example:
 
     stack --docker-run-args='--net=bridge --publish=3000:3000' \
           exec some-server
@@ -338,7 +338,7 @@ and publish port 3000.
 If you do want to do all your work, including editing, in the container, it
 might be better to use a persistent container in which you can install Ubuntu
 packages. You could get that by running something like `stack
---docker-container-name=NAME --docker-persist docker exec bash`. This
+--docker-container-name=NAME --docker-persist exec --plain bash`. This
 means when the container exits, it won't be deleted. You can then restart it
 using `docker start -a -i NAME`. It's also possible to detach from a container
 while it continues running in the background using by pressing Ctrl-P Ctrl-Q,
@@ -357,7 +357,7 @@ is an example (replace `custom` if you prefer a different name for your derived
 container):
 
     # On host
-    $ stack  --docker-persist --docker-container-name=temp docker exec bash
+    $ stack  --docker-persist --docker-container-name=temp exec --plain bash
 
     # In container, make changes to OS
     $ sudo apt-get install r-cran-numderiv

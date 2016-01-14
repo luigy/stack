@@ -152,7 +152,7 @@ library
                    , edit-distance >= 0.2
                    , either
                    , enclosed-exceptions
-                   , errors
+                   , errors < 2.2
                    , exceptions >= 0.8.0.2
                    , extra
                    , fast-logger >= 2.3.1
@@ -185,7 +185,7 @@ library
                    , split
                    , stm >= 2.4.4
                    , streaming-commons >= 0.1.10.0
-                   , tar >= 0.4.1.0
+                   , tar >= 0.4.1.0 && < 0.6
                    , template-haskell >= 2.9.0.0
                    , temporary >= 1.2.0.3
                    , text >= 1.2.0.4
