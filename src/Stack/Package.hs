@@ -237,7 +237,7 @@ resolvePackage packageConfig gpkg =
 -- options which apply generally to the package, not one specific
 -- component.
 generatePkgDescOpts
-    :: (HasEnvConfig env, HasPlatform env, MonadThrow m, MonadReader env m, MonadIO m)
+    :: (HasConfig env, HasEnvConfig env, HasPlatform env, MonadThrow m, MonadReader env m, MonadIO m)
     => SourceMap
     -> InstalledMap
     -> [PackageName] -- ^ Packages to omit from the "-package" / "-package-id" flags
@@ -248,6 +248,8 @@ generatePkgDescOpts
     -> m (Map NamedComponent BuildInfoOpts)
 generatePkgDescOpts sourceMap installedMap omitPkgs addPkgs cabalfp pkg componentPaths = do
     distDir <- distDirFromDir cabalDir
+    config <- asks getConfig
+    let extraLibDirs' = configExtraLibDirs config
     let cabalMacros = autogenDir distDir </> $(mkRelFile "cabal_macros.h")
     exists <- fileExists cabalMacros
     let mcabalMacros =
@@ -264,7 +266,7 @@ generatePkgDescOpts sourceMap installedMap omitPkgs addPkgs cabalfp pkg componen
                   distDir
                   omitPkgs
                   addPkgs
-                  binfo
+                  (binfo { extraLibDirs = (map T.unpack $ S.toList extraLibDirs') })
                   (fromMaybe mempty (M.lookup namedComponent componentPaths))
                   namedComponent)
     return
