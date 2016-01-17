@@ -8,12 +8,44 @@ Major changes:
 
 Other enhancements:
 
+Bug fixes:
+
+## 1.0.2
+
+Release notes:
+
+- Arch Linux: Stack has been adopted into the
+  [official community repository](https://www.archlinux.org/packages/community/x86_64/stack/),
+  so we will no longer be updating the AUR with new versions. See the
+  [install/upgrade guide](http://docs.haskellstack.org/en/stable/install_and_upgrade.html#arch-linux)
+  for current download instructions.
+
+Major changes:
+
+- `stack init` and `solver` overhaul
+  [#1583](https://github.com/commercialhaskell/stack/pull/1583)
+
+Other enhancements:
+
 - Disable locale/codepage hacks when GHC >=7.10.3
   [#1552](https://github.com/commercialhaskell/stack/issues/1552)
 - Specify multiple images to build for `stack image container`
   [docs](http://docs.haskellstack.org/en/latest/yaml_configuration.html#image)
 - Specify which executables to include in images for `stack image container`
   [docs](http://docs.haskellstack.org/en/latest/yaml_configuration.html#image)
+- Docker: pass supplemantary groups and umask into container
+- If git fetch fails wipe the directory and try again from scratch
+  [#1418](https://github.com/commercialhaskell/stack/issues/1418)
+- Warn if newly installed executables won't be available on the PATH
+  [#1362](https://github.com/commercialhaskell/stack/issues/1362)
+- stack.yaml: for `stack image container`, specify multiple images to generate,
+  and which executables should be added to those images
+- GHCI: add interactive Main selection
+  [#1068](https://github.com/commercialhaskell/stack/issues/1068)
+- Care less about the particular name of a GHCJS sdist folder
+  [#1622](https://github.com/commercialhaskell/stack/issues/1622)
+- Unified Enable/disable help messaging
+  [#1613](https://github.com/commercialhaskell/stack/issues/1613)
 
 Bug fixes:
 
@@ -27,6 +59,18 @@ Bug fixes:
   even when an abstract resolver is passed via `--resolver` on the
   command-line.
   [#1641](https://github.com/commercialhaskell/stack/issues/1641)
+- Fix: Stack does not allow using an external package from ghci
+  [#1557](https://github.com/commercialhaskell/stack/issues/1557)
+- Disable ambiguous global '--resolver' option for 'stack init'
+  [#1531](https://github.com/commercialhaskell/stack/issues/1531)
+- Obey `--no-nix` flag
+- Fix: GHCJS Execute.hs: Non-exhaustive patterns in lambda
+  [#1591](https://github.com/commercialhaskell/stack/issues/1591)
+- Send file-watch and sticky logger messages to stderr
+  [#1302](https://github.com/commercialhaskell/stack/issues/1302)
+  [#1635](https://github.com/commercialhaskell/stack/issues/1635)
+- Use globaldb path for querying Cabal version
+  [#1647](https://github.com/commercialhaskell/stack/issues/1647)
 
 ## 1.0.0
 
