@@ -10,10 +10,14 @@
 -- snapshot.
 
 module Stack.BuildPlan
-    ( gpdPackages
-    , BuildPlanException (..)
+    ( BuildPlanException (..)
     , BuildPlanCheck (..)
     , checkSnapBuildPlan
+    , DepError(..)
+    , DepErrors
+    , gpdPackageDeps
+    , gpdPackages
+    , gpdPackageName
     , MiniBuildPlan(..)
     , MiniPackageInfo(..)
     , loadMiniBuildPlan
@@ -23,8 +27,7 @@ module Stack.BuildPlan
     , ToolMap
     , getToolMap
     , shadowMiniBuildPlan
-    , showCompilerErrors
-    , showDepErrors
+    , showItems
     , parseCustomMiniBuildPlan
     ) where
 
@@ -449,7 +452,7 @@ loadBuildPlan name = do
             req <- parseUrl $ T.unpack url
             $logSticky $ "Downloading " <> renderSnapName name <> " build plan ..."
             $logDebug $ "Downloading build plan from: " <> url
-            _ <- download req { checkStatus = handle404 } fp
+            _ <- redownload req { checkStatus = handle404 } fp
             $logStickyDone $ "Downloaded " <> renderSnapName name <> " build plan."
             liftIO (decodeFileEither $ toFilePath fp) >>= either throwM return
 
@@ -652,6 +655,25 @@ data BuildPlanCheck =
     | BuildPlanCheckFail    (Map PackageName (Map FlagName Bool)) DepErrors
                             CompilerVersion
 
+-- | Compare 'BuildPlanCheck', where GT means a better plan.
+compareBuildPlanCheck :: BuildPlanCheck -> BuildPlanCheck -> Ordering
+compareBuildPlanCheck (BuildPlanCheckPartial _ e1) (BuildPlanCheckPartial _ e2) =
+    -- Note: order of comparison flipped, since it's better to have fewer errors.
+    compare (Map.size e2) (Map.size e1)
+compareBuildPlanCheck (BuildPlanCheckFail _ e1 _) (BuildPlanCheckFail _ e2 _) =
+    let numUserPkgs e = Map.size $ Map.unions (Map.elems (fmap deNeededBy e))
+    in compare (numUserPkgs e2) (numUserPkgs e1)
+compareBuildPlanCheck BuildPlanCheckOk{}      BuildPlanCheckOk{}      = EQ
+compareBuildPlanCheck BuildPlanCheckOk{}      BuildPlanCheckPartial{} = GT
+compareBuildPlanCheck BuildPlanCheckOk{}      BuildPlanCheckFail{}    = GT
+compareBuildPlanCheck BuildPlanCheckPartial{} BuildPlanCheckFail{}    = GT
+compareBuildPlanCheck _                       _                       = LT
+
+instance Show BuildPlanCheck where
+    show BuildPlanCheckOk {} = ""
+    show (BuildPlanCheckPartial f e)  = T.unpack $ showDepErrors f e
+    show (BuildPlanCheckFail f e c) = T.unpack $ showCompilerErrors f e c
+
 -- | Check a set of 'GenericPackageDescription's and a set of flags against a
 -- given snapshot. Returns how well the snapshot satisfies the dependencies of
 -- the packages.
@@ -697,44 +719,54 @@ selectBestSnapshot
        , MonadBaseControl IO m)
     => [GenericPackageDescription]
     -> [SnapName]
-    -> m (Maybe SnapName)
+    -> m (SnapName, BuildPlanCheck)
 selectBestSnapshot gpds snaps = do
     $logInfo $ "Selecting the best among "
                <> T.pack (show (length snaps))
                <> " snapshots...\n"
     loop Nothing snaps
     where
-        loop Nothing [] = return Nothing
-        loop (Just (snap, _)) [] = return $ Just snap
+        loop Nothing []          = error "Bug: in best snapshot selection"
+        loop (Just pair) []      = return pair
         loop bestYet (snap:rest) = do
             result <- checkSnapBuildPlan gpds Nothing snap
             reportResult result snap
+            let new = (snap, result)
             case result of
-                BuildPlanCheckFail _ _ _ -> loop bestYet rest
-                BuildPlanCheckOk _ -> return $ Just snap
-                BuildPlanCheckPartial _ e -> do
-                    case bestYet of
-                        Nothing -> loop (Just (snap, e)) rest
-                        Just prev ->
-                            loop (Just (betterSnap prev (snap, e))) rest
+                BuildPlanCheckOk {} -> return new
+                _ -> case bestYet of
+                        Nothing  -> loop (Just new) rest
+                        Just old -> loop (Just (betterSnap old new)) rest
 
-        betterSnap (s1, e1) (s2, e2)
-          | (Map.size e1) <= (Map.size e2) = (s1, e1)
-          | otherwise = (s2, e2)
+        betterSnap (s1, r1) (s2, r2)
+          | compareBuildPlanCheck r1 r2 /= LT = (s1, r1)
+          | otherwise = (s2, r2)
 
-        reportResult (BuildPlanCheckOk _) snap = do
-            $logInfo $ "* Selected " <> renderSnapName snap
+        reportResult BuildPlanCheckOk {} snap = do
+            $logInfo $ "* Matches " <> renderSnapName snap
             $logInfo ""
 
-        reportResult (BuildPlanCheckPartial f errs) snap = do
+        reportResult r@BuildPlanCheckPartial {} snap = do
             $logWarn $ "* Partially matches " <> renderSnapName snap
-            $logWarn $ indent $ showDepErrors f errs
+            $logWarn $ indent $ T.pack $ show r
 
-        reportResult (BuildPlanCheckFail f errs compiler) snap = do
+        reportResult r@BuildPlanCheckFail {} snap = do
             $logWarn $ "* Rejected " <> renderSnapName snap
-            $logWarn $ indent $ showCompilerErrors f errs compiler
+            $logWarn $ indent $ T.pack $ show r
 
         indent t = T.unlines $ fmap ("    " <>) (T.lines t)
+
+showItems :: Show a => [a] -> Text
+showItems items = T.concat (map formatItem items)
+    where
+        formatItem item = T.concat
+            [ "    - "
+            , T.pack $ show item
+            , "\n"
+            ]
+
+showMapPackages :: Map PackageName a -> Text
+showMapPackages mp = showItems $ Map.keys mp
 
 showCompilerErrors
     :: Map PackageName (Map FlagName Bool)
@@ -742,22 +774,12 @@ showCompilerErrors
     -> CompilerVersion
     -> Text
 showCompilerErrors flags errs compiler =
-    -- TODO print the package filename to enable quick mapping for the user
     T.concat
         [ compilerVersionText compiler
         , " cannot be used for these packages:\n"
-        , T.concat (map formatError (Map.toList errs))
+        , showMapPackages $ Map.unions (Map.elems (fmap deNeededBy errs))
         , showDepErrors flags errs -- TODO only in debug mode
         ]
-    where
-        formatError (_, DepError _ neededBy) = T.concat $
-            map formatItem (Map.toList neededBy)
-
-        formatItem (user, _) = T.concat
-            [ "    - "
-            , T.pack $ packageNameString user
-            , "\n"
-            ]
 
 showDepErrors :: Map PackageName (Map FlagName Bool) -> DepErrors -> Text
 showDepErrors flags errs =
