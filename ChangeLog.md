@@ -10,6 +10,9 @@ Other enhancements:
 
 Bug fixes:
 
+* Previously, `stack ghci` would fail with `cannot satisfy -package-id` when the
+  implicit build step changes the package key of some dependency.
+
 ## 1.0.2
 
 Release notes:
@@ -30,9 +33,9 @@ Other enhancements:
 - Disable locale/codepage hacks when GHC >=7.10.3
   [#1552](https://github.com/commercialhaskell/stack/issues/1552)
 - Specify multiple images to build for `stack image container`
-  [docs](http://docs.haskellstack.org/en/latest/yaml_configuration.html#image)
+  [docs](http://docs.haskellstack.org/en/v1.0.2/yaml_configuration.html#image)
 - Specify which executables to include in images for `stack image container`
-  [docs](http://docs.haskellstack.org/en/latest/yaml_configuration.html#image)
+  [docs](http://docs.haskellstack.org/en/v1.0.2/yaml_configuration.html#image)
 - Docker: pass supplemantary groups and umask into container
 - If git fetch fails wipe the directory and try again from scratch
   [#1418](https://github.com/commercialhaskell/stack/issues/1418)
