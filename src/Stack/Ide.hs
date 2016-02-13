@@ -8,7 +8,7 @@
 -- | Run a IDE configured with the user's package(s).
 
 module Stack.Ide
-    (ide, getPackageOptsAndTargetFiles)
+    (ide, getPackageOptsAndTargetFiles, ideGhciOpts)
     where
 
 import           Control.Monad.Catch
@@ -27,7 +27,7 @@ import           Path
 import           Path.Extra (toFilePathNoTrailingSep)
 import           Path.IO
 import           Stack.Constants
-import           Stack.Ghci (GhciPkgInfo(..), ghciSetup)
+import           Stack.Ghci (GhciPkgInfo(..), GhciOpts(..), ghciSetup)
 import           Stack.Package
 import           Stack.Types
 import           Stack.Types.Internal
@@ -48,8 +48,8 @@ ide targets useropts = do
             { boptsTargets = targets
             , boptsBuildSubset = BSOnlyDependencies
             }
-    (_realTargets,_,pkgs) <- ghciSetup bopts False False Nothing []
-    pwd <- getWorkingDir
+    (_realTargets,_,pkgs) <- ghciSetup (ideGhciOpts bopts)
+    pwd <- getCurrentDir
     (pkgopts,_srcfiles) <-
         liftM mconcat $ forM pkgs $ getPackageOptsAndTargetFiles pwd
     localdb <- packageDatabaseLocal
@@ -96,7 +96,7 @@ getPackageOptsAndTargetFiles pwd pkg = do
             (autogen </>)
             (parseRelFile
                  ("Paths_" ++ packageNameString (ghciPkgName pkg) ++ ".hs"))
-    paths_foo_exists <- fileExists paths_foo
+    paths_foo_exists <- doesFileExist paths_foo
     let ghcOptions bio =
             bioOneWordOpts bio ++
             bioOpts bio ++
@@ -109,3 +109,17 @@ getPackageOptsAndTargetFiles pwd pkg = do
               (fmap toFilePath . stripDir pwd)
               (S.toList (ghciPkgCFiles pkg) <> S.toList (ghciPkgModFiles pkg) <>
                [paths_foo | paths_foo_exists]))
+
+ideGhciOpts :: BuildOpts -> GhciOpts
+ideGhciOpts bopts = GhciOpts
+    { ghciNoBuild = False
+    , ghciArgs = []
+    , ghciGhcCommand = Nothing
+    , ghciNoLoadModules = False
+    , ghciAdditionalPackages = []
+    , ghciMainIs = Nothing
+    , ghciLoadLocalDeps = False
+    , ghciSkipIntermediate = False
+    , ghciHidePackages = True
+    , ghciBuildOpts = bopts
+    }

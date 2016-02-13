@@ -9,19 +9,19 @@ module Stack.Init
 
 import           Control.Exception               (assert)
 import           Control.Exception.Enclosed      (catchAny)
-import           Control.Monad                   (when)
+import           Control.Monad
 import           Control.Monad.Catch             (MonadMask, throwM)
 import           Control.Monad.IO.Class
 import           Control.Monad.Logger
-import           Control.Monad.Reader            (asks, MonadReader)
+import           Control.Monad.Reader            (MonadReader, asks)
 import           Control.Monad.Trans.Control     (MonadBaseControl)
 import qualified Data.ByteString.Builder         as B
-import qualified Data.ByteString.Lazy            as L
 import qualified Data.ByteString.Char8           as BC
+import qualified Data.ByteString.Lazy            as L
+import qualified Data.Foldable                   as F
 import           Data.Function                   (on)
 import qualified Data.HashMap.Strict             as HM
 import qualified Data.IntMap                     as IntMap
-import qualified Data.Foldable                   as F
 import           Data.List                       (intersect, maximumBy)
 import           Data.List.Extra                 (nubOrd)
 import           Data.Map                        (Map)
@@ -35,14 +35,13 @@ import           Network.HTTP.Client.Conduit     (HasHttpManager)
 import           Path
 import           Path.IO
 import           Stack.BuildPlan
+import           Stack.Config                    (getSnapshots,
+                                                  makeConcreteResolver)
 import           Stack.Constants
 import           Stack.Solver
 import           Stack.Types
-import           Stack.Types.Internal            ( HasTerminal, HasReExec
-                                                 , HasLogLevel)
-import           System.Directory                (makeRelativeToCurrentDirectory)
-import           Stack.Config                    ( getSnapshots
-                                                 , makeConcreteResolver)
+import           Stack.Types.Internal            (HasLogLevel, HasReExec,
+                                                  HasTerminal)
 import qualified System.FilePath                 as FP
 
 -- | Generate stack.yaml
@@ -57,20 +56,21 @@ initProject
     -> m ()
 initProject currDir initOpts mresolver = do
     let dest = currDir </> stackDotYaml
-        dest' = toFilePath dest
 
-    reldest <- liftIO $ makeRelativeToCurrentDirectory dest'
+    reldest <- toFilePath `liftM` makeRelativeToCurrentDir dest
 
-    exists <- fileExists dest
+    exists <- doesFileExist dest
     when (not (forceOverwrite initOpts) && exists) $ do
         error ("Stack configuration file " <> reldest <>
                " exists, use 'stack solver' to fix the existing config file or \
                \'--force' to overwrite it.")
 
+    dirs <- mapM (resolveDir' . T.unpack) (searchDirs initOpts)
     let noPkgMsg =  "In order to init, you should have an existing .cabal \
                     \file. Please try \"stack new\" instead."
-
-    cabalfps <- findCabalFiles (includeSubDirs initOpts) currDir
+        find  = findCabalFiles (includeSubDirs initOpts)
+        dirs' = if null dirs then [currDir] else dirs
+    cabalfps <- liftM concat $ mapM find dirs'
     (bundle, dupPkgs)  <- cabalPackagesCheck cabalfps noPkgMsg Nothing
 
     (r, flags, extraDeps, rbundle) <- getDefaultResolver dest initOpts
@@ -125,7 +125,7 @@ initProject currDir initOpts mresolver = do
                     | otherwise -> assert False $ toFilePath dir
                 Just rel -> toFilePath rel
 
-        makeRel = liftIO . makeRelativeToCurrentDirectory . toFilePath
+        makeRel = fmap toFilePath . makeRelativeToCurrentDir
 
         pkgs = map toPkg $ Map.elems (fmap (parent . fst) rbundle)
         toPkg dir = PackageEntry
@@ -161,7 +161,7 @@ initProject currDir initOpts mresolver = do
         (if exists then "Overwriting existing configuration file: "
          else "Writing configuration to file: ")
         <> T.pack reldest
-    liftIO $ L.writeFile dest'
+    liftIO $ L.writeFile (toFilePath dest)
            $ B.toLazyByteString
            $ renderStackYaml p
                (Map.elems $ fmap (makeRelDir . parent . fst) ignored)
@@ -437,9 +437,11 @@ getRecommendedSnapshots snapshots = do
         ]
 
 data InitOpts = InitOpts
-    { useSolver :: Bool
+    { searchDirs     :: ![T.Text]
+    -- ^ List of sub directories to search for .cabal files
+    , useSolver      :: Bool
     -- ^ Use solver to determine required external dependencies
-    , omitPackages :: Bool
+    , omitPackages   :: Bool
     -- ^ Exclude conflicting or incompatible user packages
     , forceOverwrite :: Bool
     -- ^ Overwrite existing stack.yaml

@@ -11,6 +11,7 @@
 module Stack.Ghci
     ( GhciOpts(..)
     , GhciPkgInfo(..)
+    , GhciException(..)
     , ghciSetup
     , ghci
     ) where
@@ -36,6 +37,7 @@ import           Data.Set (Set)
 import qualified Data.Set as S
 import           Data.Text (Text)
 import qualified Data.Text as T
+import           Data.Typeable (Typeable)
 import           Distribution.ModuleName (ModuleName)
 import           Distribution.Text (display)
 import           Network.HTTP.Client.Conduit
@@ -52,8 +54,7 @@ import           Stack.Exec
 import           Stack.Package
 import           Stack.Types
 import           Stack.Types.Internal
-import           System.Directory (getTemporaryDirectory)
-import Text.Read (readMaybe)
+import           Text.Read (readMaybe)
 
 #ifndef WINDOWS
 import qualified System.Posix.Files as Posix
@@ -67,6 +68,7 @@ data GhciOpts = GhciOpts
     , ghciNoLoadModules      :: !Bool
     , ghciAdditionalPackages :: ![String]
     , ghciMainIs             :: !(Maybe Text)
+    , ghciLoadLocalDeps      :: !Bool
     , ghciSkipIntermediate   :: !Bool
     , ghciHidePackages       :: !Bool
     , ghciBuildOpts          :: !BuildOpts
@@ -84,18 +86,33 @@ data GhciPkgInfo = GhciPkgInfo
     , ghciPkgPackage :: !Package
     } deriving Show
 
+data GhciException
+    = InvalidPackageOption String
+    | LoadingDuplicateModules
+    deriving (Typeable)
+
+instance Exception GhciException
+
+instance Show GhciException where
+    show (InvalidPackageOption name) =
+        "Failed to parse --package option " ++ name
+    show LoadingDuplicateModules = unlines
+        [ "Not attempting to start ghci due to these duplicate modules."
+        , "Use --no-load to try to start it anyway, without loading any modules (but these are still likely to cause errors)"
+        ]
+
 -- | Launch a GHCi session for the given local package targets with the
 -- given options and configure it with the load paths and extensions
 -- of those targets.
 ghci
     :: (HasConfig r, HasBuildConfig r, HasHttpManager r, MonadMask m, HasLogLevel r, HasTerminal r, HasEnvConfig r, MonadReader r m, MonadIO m, MonadThrow m, MonadLogger m, MonadCatch m, MonadBaseControl IO m)
     => GhciOpts -> m ()
-ghci GhciOpts{..} = do
+ghci opts@GhciOpts{..} = do
     let bopts = ghciBuildOpts
             { boptsTestOpts = (boptsTestOpts ghciBuildOpts) { toDisableRun = True }
             , boptsBenchmarkOpts = (boptsBenchmarkOpts ghciBuildOpts) { beoDisableRun = True }
             }
-    (targets,mainIsTargets,pkgs) <- ghciSetup bopts ghciNoBuild ghciSkipIntermediate ghciMainIs ghciAdditionalPackages
+    (targets,mainIsTargets,pkgs) <- ghciSetup opts { ghciBuildOpts = bopts }
     config <- asks getConfig
     bconfig <- asks getBuildConfig
     wc <- getWhichCompiler
@@ -117,12 +134,12 @@ ghci GhciOpts{..} = do
         $logWarn
             ("The following GHC options are incompatible with GHCi and have not been passed to it: " <>
              T.unwords (map T.pack (nubOrd omittedOpts)))
+    allModules <- checkForDuplicateModules ghciNoLoadModules pkgs
     oiDir <- objectInterfaceDir bconfig
     (modulesToLoad, thingsToLoad) <- if ghciNoLoadModules then return ([], []) else do
         mainFile <- figureOutMainFile bopts mainIsTargets targets pkgs
-        let modulesToLoad = nubOrd $ concatMap (map display . S.toList . ghciPkgModules) pkgs
-            thingsToLoad = maybe [] (return . toFilePath) mainFile <> modulesToLoad
-        return (modulesToLoad, thingsToLoad)
+        let thingsToLoad = maybe [] (return . toFilePath) mainFile <> allModules
+        return (allModules, thingsToLoad)
     let odir =
             [ "-odir=" <> toFilePathNoTrailingSep oiDir
             , "-hidir=" <> toFilePathNoTrailingSep oiDir ]
@@ -138,8 +155,7 @@ ghci GhciOpts{..} = do
                  -- include CWD.
                   "-i" :
                   odir <> pkgopts <> ghciArgs <> extras)
-    tmp <- liftIO getTemporaryDirectory
-    withCanonicalizedTempDirectory tmp "ghci" $ \tmpDir -> do
+    withSystemTempDir "ghci" $ \tmpDir -> do
         let macrosFile = tmpDir </> $(mkRelFile "cabal_macros.h")
         macrosOpts <- preprocessCabalMacros pkgs macrosFile
         if ghciNoLoadModules
@@ -244,29 +260,26 @@ figureOutMainFile bopts mainIsTargets targets0 packages =
 -- information to load that package/components.
 ghciSetup
     :: (HasConfig r, HasHttpManager r, HasBuildConfig r, MonadMask m, HasTerminal r, HasLogLevel r, HasEnvConfig r, MonadReader r m, MonadIO m, MonadThrow m, MonadLogger m, MonadCatch m, MonadBaseControl IO m)
-    => BuildOpts
-    -> Bool
-    -> Bool
-    -> Maybe Text
-    -> [String]
+    => GhciOpts
     -> m (Map PackageName SimpleTarget, Maybe (Map PackageName SimpleTarget), [GhciPkgInfo])
-ghciSetup bopts0 noBuild skipIntermediate mainIs additionalPackages = do
+ghciSetup GhciOpts{..} = do
+    let bopts0 = ghciBuildOpts
     (_,_,targets) <- parseTargetsFromBuildOpts AllowNoTargets bopts0
     mainIsTargets <-
-        case mainIs of
+        case ghciMainIs of
             Nothing -> return Nothing
             Just target -> do
                 (_,_,targets') <- parseTargetsFromBuildOpts AllowNoTargets bopts0 { boptsTargets = [target] }
                 return (Just targets')
-    addPkgs <- forM additionalPackages $ \name -> do
+    addPkgs <- forM ghciAdditionalPackages $ \name -> do
         let mres = (packageIdentifierName <$> parsePackageIdentifierFromString name)
                 <|> parsePackageNameFromString name
-        maybe (fail $ "Failed to parse --package option " ++ name) return mres
+        maybe (throwM $ InvalidPackageOption name) return mres
     let bopts = bopts0
-            { boptsTargets = boptsTargets bopts0 ++ map T.pack additionalPackages
+            { boptsTargets = boptsTargets bopts0 ++ map T.pack ghciAdditionalPackages
             }
     -- Try to build, but optimistically launch GHCi anyway if it fails (#1065)
-    unless noBuild $ do
+    unless ghciNoBuild $ do
         eres <- tryAny $ build (const (return ())) Nothing bopts
         case eres of
             Right () -> return ()
@@ -294,20 +307,27 @@ ghciSetup bopts0 noBuild skipIntermediate mainIs additionalPackages = do
                                  return (Just (name, (cabalfp, simpleTargets)))
                              Nothing -> return Nothing
                     else return Nothing
-    let intermediateDeps = getIntermediateDeps sourceMap directlyWanted
+    let extraLoadDeps = getExtraLoadDeps ghciLoadLocalDeps sourceMap directlyWanted
     wanted <-
-        if skipIntermediate || null intermediateDeps
+        if (ghciSkipIntermediate && not ghciLoadLocalDeps) || null extraLoadDeps
             then return directlyWanted
             else do
-                $logInfo $ T.concat
-                    [ "The following libraries will also be loaded into GHCi because "
-                    , "they are intermediate dependencies of your targets:\n    "
-                    , T.intercalate ", " (map (packageNameText . fst) intermediateDeps)
-                    , "\n(Use --skip-intermediate-deps to omit these)"
-                    ]
-                return (directlyWanted ++ intermediateDeps)
+                let extraList = T.intercalate ", " (map (packageNameText . fst) extraLoadDeps)
+                if ghciLoadLocalDeps
+                    then $logInfo $ T.concat
+                        [ "The following libraries will also be loaded into GHCi because "
+                        , "they are local dependencies of your targets, and you specified --load-local-deps:\n    "
+                        , extraList
+                        ]
+                    else $logInfo $ T.concat
+                        [ "The following libraries will also be loaded into GHCi because "
+                        , "they are intermediate dependencies of your targets:\n    "
+                        , extraList
+                        , "\n(Use --skip-intermediate-deps to omit these)"
+                        ]
+                return (directlyWanted ++ extraLoadDeps)
     -- Load the list of modules _after_ building, to catch changes in unlisted dependencies (#1180)
-    let localLibs = [name | (name, (_, target)) <- wanted , hasLocalComp isCLib target]
+    let localLibs = [name | (name, (_, target)) <- wanted, hasLocalComp isCLib target]
     infos <-
         forM wanted $
         \(name,(cabalfp,target)) ->
@@ -446,15 +466,35 @@ borderedWarning f = do
     $logWarn ""
     return x
 
+checkForDuplicateModules :: (MonadThrow m, MonadLogger m) => Bool -> [GhciPkgInfo] -> m [String]
+checkForDuplicateModules noLoadModules pkgs = do
+    unless (null duplicates) $ do
+        borderedWarning $ do
+            $logWarn "The following modules are present in multiple packages:"
+            forM_ duplicates $ \(mn, pns) -> do
+                $logWarn (" * " <> T.pack mn <> " (in " <> T.intercalate ", " (map packageNameText pns) <> ")")
+        unless noLoadModules $ throwM LoadingDuplicateModules
+    return (map fst allModules)
+  where
+    duplicates, allModules :: [(String, [PackageName])]
+    duplicates = filter (not . null . tail . snd) allModules
+    allModules =
+        M.toList $ M.fromListWith (++) $
+        concatMap (\pkg -> map (, [ghciPkgName pkg]) (map display (S.toList (ghciPkgModules pkg)))) pkgs
+
 -- Adds in intermediate dependencies between ghci targets. Note that it
 -- will return a Lib component for these intermediate dependencies even
 -- if they don't have a library (but that's fine for the usage within
 -- this module).
-getIntermediateDeps
-    :: SourceMap
+--
+-- If 'True' is passed for loadAllDeps, this loads all local deps, even
+-- if they aren't intermediate.
+getExtraLoadDeps
+    :: Bool
+    -> SourceMap
     -> [(PackageName, (Path Abs File, SimpleTarget))]
     -> [(PackageName, (Path Abs File, SimpleTarget))]
-getIntermediateDeps sourceMap targets =
+getExtraLoadDeps loadAllDeps sourceMap targets =
     M.toList $
     (\mp -> foldl' (flip M.delete) mp (map fst targets)) $
     M.mapMaybe id $
@@ -471,19 +511,19 @@ getIntermediateDeps sourceMap targets =
         cache <- get
         case (M.lookup name cache, M.lookup name sourceMap) of
             (Just (Just _), _) -> return True
-            (Just Nothing, _) -> return False
+            (Just Nothing, _) | not loadAllDeps -> return False
             (_, Just (PSLocal lp)) -> do
                 let deps = M.keys (packageDeps (lpPackage lp))
-                isIntermediate <- liftM or $ mapM go deps
-                if isIntermediate
+                shouldLoad <- liftM or $ mapM go deps
+                if shouldLoad
                     then do
                         modify (M.insert name (Just (lpCabalFile lp, STLocalComps (S.singleton CLib))))
                         return True
                     else do
                         modify (M.insert name Nothing)
                         return False
-            (_, Just PSUpstream{}) -> return False
-            (Nothing, Nothing) -> return False
+            (_, Just PSUpstream{}) -> return loadAllDeps
+            (_, _) -> return False
 
 preprocessCabalMacros :: MonadIO m => [GhciPkgInfo] -> Path Abs File -> m [String]
 preprocessCabalMacros pkgs out = liftIO $ do
