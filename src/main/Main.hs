@@ -75,7 +75,7 @@ import qualified Stack.Image as Image
 import           Stack.Init
 import           Stack.New
 import           Stack.Options
-import           Stack.Package (getCabalFileName)
+import           Stack.Package (findOrGenerateCabalFile)
 import qualified Stack.PackageIndex
 import           Stack.SDist (getSDistTarball, checkSDistTarball, checkSDistTarball')
 import           Stack.Setup
@@ -1063,7 +1063,7 @@ packagesCmd () go@GlobalOpts{..} =
          locals <-
              forM (M.toList (envConfigPackages econfig)) $
              \(dir,_) ->
-                  do cabalfp <- getCabalFileName dir
+                  do cabalfp <- findOrGenerateCabalFile dir
                      parsePackageNameFromFilePath cabalfp
          forM_ locals (liftIO . putStrLn . packageNameString)
 
@@ -1180,7 +1180,7 @@ initCmd initOpts go = do
 newCmd :: (NewOpts,InitOpts) -> GlobalOpts -> IO ()
 newCmd (newOpts,initOpts) go@GlobalOpts{..} = do
     withMiniConfigAndLock go $ do
-        dir <- new newOpts
+        dir <- new newOpts (forceOverwrite initOpts)
         initProject dir initOpts globalResolver
 
 -- | List the available templates.

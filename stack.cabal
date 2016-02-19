@@ -1,5 +1,5 @@
 name:                stack
-version:             1.0.3
+version:             1.0.5
 synopsis:            The Haskell Tool Stack
 description:         Please see the README.md for usage information, and
                      the wiki on Github for more details.  Also, note that
@@ -207,6 +207,7 @@ library
                    , project-template >= 0.2
                    , uuid
                    , zip-archive
+                   , hpack >= 0.9.0
   if os(windows)
     cpp-options:     -DWINDOWS
     build-depends:   Win32

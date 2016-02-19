@@ -20,7 +20,7 @@ module Stack.Package
   ,readPackageUnresolved
   ,readPackageUnresolvedBS
   ,resolvePackage
-  ,getCabalFileName
+  ,findOrGenerateCabalFile
   ,Package(..)
   ,GetPackageFiles(..)
   ,GetPackageOpts(..)
@@ -91,6 +91,8 @@ import qualified System.Directory as D
 import           System.FilePath (splitExtensions, replaceExtension)
 import qualified System.FilePath as FilePath
 import           System.IO.Error
+import qualified Hpack
+import qualified Hpack.Config as Hpack
 
 -- | Read the raw, unresolved package information.
 readPackageUnresolved :: (MonadIO m, MonadThrow m)
@@ -141,7 +143,7 @@ readPackageDescriptionDir :: (MonadLogger m, MonadIO m, MonadThrow m, MonadCatch
   -> Path Abs Dir
   -> m (GenericPackageDescription, PackageDescription)
 readPackageDescriptionDir config pkgDir = do
-    cabalfp <- getCabalFileName pkgDir
+    cabalfp <- findOrGenerateCabalFile pkgDir
     gdesc   <- liftM snd (readPackageUnresolved cabalfp)
     return (gdesc, resolvePackageDescription config gdesc)
 
@@ -213,12 +215,23 @@ resolvePackage packageConfig gpkg =
   where
     pkgFiles = GetPackageFiles $
         \cabalfp ->
-             do distDir <- distDirFromDir (parent cabalfp)
+             do let pkgDir = parent cabalfp
+                distDir <- distDirFromDir pkgDir
                 (componentModules,componentFiles,dataFiles',warnings) <-
                     runReaderT
                         (packageDescModulesAndFiles pkg)
                         (cabalfp, buildDir distDir)
-                return (componentModules, componentFiles, S.insert cabalfp dataFiles', warnings)
+                buildFiles <- liftM (S.insert cabalfp) $
+                    if buildType pkg `elem` [Nothing, Just Custom]
+                    then do
+                        let setupHsPath = pkgDir </> $(mkRelFile "Setup.hs")
+                            setupLhsPath = pkgDir </> $(mkRelFile "Setup.lhs")
+                        setupHsExists <- doesFileExist setupHsPath
+                        if setupHsExists then return (S.singleton setupHsPath) else do
+                            setupLhsExists <- doesFileExist setupLhsPath
+                            if setupLhsExists then return (S.singleton setupLhsPath) else return S.empty
+                    else return S.empty
+                return (componentModules, componentFiles, buildFiles <> dataFiles', warnings)
     pkgId = package (packageDescription gpkg)
     name = fromCabalPackageName (pkgName pkgId)
     pkg = resolvePackageDescription packageConfig gpkg
@@ -1051,11 +1064,15 @@ logPossibilities dirs mn = do
 --
 -- If no .cabal file is present, or more than one is present, an exception is
 -- thrown via 'throwM'.
-getCabalFileName
+--
+-- If the directory contains a file named package.yaml, hpack is used to
+-- generate a .cabal file from it.
+findOrGenerateCabalFile
     :: (MonadThrow m, MonadIO m)
     => Path Abs Dir -- ^ package directory
     -> m (Path Abs File)
-getCabalFileName pkgDir = do
+findOrGenerateCabalFile pkgDir = do
+    liftIO $ hpack pkgDir
     files <- liftIO $ findFiles
         pkgDir
         (flip hasExtension "cabal" . FL.toFilePath)
@@ -1065,6 +1082,13 @@ getCabalFileName pkgDir = do
         [x] -> return x
         _:_ -> throwM $ PackageMultipleCabalFilesFound pkgDir files
   where hasExtension fp x = FilePath.takeExtension fp == "." ++ x
+
+-- | Generate .cabal file from package.yaml, if necessary.
+hpack :: Path Abs Dir -> IO ()
+hpack pkgDir = do
+    exists <- doesFileExist (pkgDir </> $(mkRelFile Hpack.packageConfig))
+    when exists $ do
+        Hpack.hpack (toFilePath pkgDir) True
 
 -- | Path for the package's build log.
 buildLogPath :: (MonadReader env m, HasBuildConfig env, MonadThrow m)

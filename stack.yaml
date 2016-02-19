@@ -1,4 +1,4 @@
-resolver: lts-5.0
+resolver: lts-5.3
 image:
   containers:
     - base: "fpco/ubuntu-with-libgmp:14.04"
@@ -11,3 +11,4 @@ nix:
     - zlib
 extra-deps:
 - path-io-0.3.1
+- hpack-0.9.0
